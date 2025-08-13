@@ -59,8 +59,8 @@ CREATE TABLE IF NOT EXISTS {table_name} (
 )
 """
 SQL_CREATE_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_docs_{table_name} ON {table_name}(text) 
-INDEXTYPE IS CTXSYS.CONTEXT PARAMETERS 
+CREATE INDEX IF NOT EXISTS idx_docs_{table_name} ON {table_name}(text)
+INDEXTYPE IS CTXSYS.CONTEXT PARAMETERS
 ('FILTER CTXSYS.NULL_FILTER SECTION GROUP CTXSYS.HTML_SECTION_GROUP LEXER world_lexer')
 """
 
@@ -109,8 +109,19 @@ class OracleVector(BaseVector):
             )
 
     def _get_connection(self) -> Connection:
-        connection = oracledb.connect(user=self.config.user, password=self.config.password, dsn=self.config.dsn)
-        return connection
+        if self.config.is_autonomous:
+            connection = oracledb.connect(
+                user=self.config.user,
+                password=self.config.password,
+                dsn=self.config.dsn,
+                config_dir=self.config.config_dir,
+                wallet_location=self.config.wallet_location,
+                wallet_password=self.config.wallet_password,
+            )
+            return connection
+        else:
+            connection = oracledb.connect(user=self.config.user, password=self.config.password, dsn=self.config.dsn)
+            return connection
 
     def _create_connection_pool(self, config: OracleVectorConfig):
         pool_params = {
@@ -164,7 +175,7 @@ class OracleVector(BaseVector):
                 with conn.cursor() as cur:
                     try:
                         cur.execute(
-                            f"""INSERT INTO {self.table_name} (id, text, meta, embedding) 
+                            f"""INSERT INTO {self.table_name} (id, text, meta, embedding)
                         VALUES (:1, :2, :3, :4)""",
                             value,
                         )
@@ -227,8 +238,8 @@ class OracleVector(BaseVector):
             conn.outputtypehandler = self.output_type_handler
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""SELECT meta, text, vector_distance(embedding,(select to_vector(:1) from dual),cosine) 
-                    AS distance FROM {self.table_name} 
+                    f"""SELECT meta, text, vector_distance(embedding,(select to_vector(:1) from dual),cosine)
+                    AS distance FROM {self.table_name}
                     {where_clause} ORDER BY distance fetch first {top_k} rows only""",
                     [numpy.array(query_vector)],
                 )
@@ -261,7 +272,7 @@ class OracleVector(BaseVector):
                 words = pseg.cut(query)
                 current_entity = ""
                 for word, pos in words:
-                    if pos in {"nr", "Ng", "eng", "nz", "n", "ORG", "v"}:  # nr: 人名, ns: 地名, nt: 机构名
+                    if pos in {"nr", "Ng", "eng", "nz", "n", "ORG", "v"}:  # nr: 人名，ns: 地名，nt: 机构名
                         current_entity += word
                     else:
                         if current_entity:
@@ -290,7 +301,7 @@ class OracleVector(BaseVector):
                         document_ids = ", ".join(f"'{id}'" for id in document_ids_filter)
                         where_clause = f" AND metadata->>'document_id' in ({document_ids}) "
                     cur.execute(
-                        f"""select meta, text, embedding FROM {self.table_name} 
+                        f"""select meta, text, embedding FROM {self.table_name}
                     WHERE CONTAINS(text, :kk, 1) > 0  {where_clause}
                     order by score(1) desc fetch first {top_k} rows only""",
                         kk=" ACCUM ".join(entities),
@@ -303,7 +314,6 @@ class OracleVector(BaseVector):
             return docs
         else:
             return [Document(page_content="", metadata={})]
-        return []
 
     def delete(self) -> None:
         with self._get_connection() as conn:
